@@ -1,1 +1,242 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<title>Editor Macchina da Scrivere Responsive</title>
+<style>
+  html, body {
+    height: 100%;
+    margin: 0;
+    font-family: monospace;
+    background: #f0f0f0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
 
+  #controls {
+    text-align: center;
+    margin: 20px 0;
+  }
+
+  button, #loginStatus {
+    width: 160px;
+    margin: 0 10px 10px 10px;
+    padding: 10px 0;
+    font-size: 16px;
+    border-radius: 4px;
+    border: 2px solid #000;
+    cursor: pointer;
+    font-family: monospace;
+    box-shadow: 2px 2px 0 #000;
+    background-color: #e0e0e0;
+    text-align: center;
+    display: inline-block;
+    vertical-align: middle;
+    transition: all 0.1s ease;
+  }
+
+  button:hover {
+    background-color: #d0d0d0;
+    transform: translate(1px, 1px);
+    box-shadow: 1px 1px 0 #000;
+  }
+
+  #loginStatus {
+    line-height: 1.2;
+    background-color: #f0f0f0;
+    font-weight: bold;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    box-sizing: border-box;
+  }
+
+  #loginStatus span {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    margin-right: 8px;
+    border: 1px solid #000;
+  }
+
+  #editor-container {
+    position: relative;
+    background: #fff8e7;
+    border: 1px solid #000;
+    box-shadow: 0 0 10px rgba(0,0,0,0.3);
+    width: 793px;
+    height: 1122px;
+    transform-origin: top center;
+  }
+
+  #editor {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    padding: 96px;
+    outline: none;
+    white-space: pre-wrap;
+    overflow-wrap: break-word;
+    overflow-y: auto;
+    font-family: "Courier New", monospace;
+    font-size: 12pt;
+    line-height: 1.2em;
+    user-select: none;
+  }
+
+  #editor-container::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    border: 1px dashed #ccc;
+    pointer-events: none;
+  }
+</style>
+</head>
+<body>
+
+<h1>Remington Standard 10</h1>
+
+<div id="controls">
+  <button id="loginBtn">Login Google</button>
+  <span id="loginStatus"><span style="background-color: red;"></span>Non loggato</span>
+  <button id="createBtn">Crea Documento</button>
+  <button id="toggleSoundBtn">Suono Tasti: ON</button>
+</div>
+
+<div id="editor-container">
+  <div id="editor" contenteditable="true"></div>
+</div>
+
+<audio id="keySound" src="click.mp3" preload="auto"></audio>
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<script type="module">
+  const editor = document.getElementById("editor");
+  const container = document.getElementById("editor-container");
+  const loginStatus = document.getElementById("loginStatus");
+  const loginIndicator = loginStatus.querySelector("span");
+  const keySound = document.getElementById("keySound");
+  const toggleSoundBtn = document.getElementById("toggleSoundBtn");
+
+  let accessToken = null;
+  let DOC_ID = null;
+  let lastSyncedLength = 0;
+  let soundEnabled = true;
+
+  const ENABLE_SPELLCHECK = false;
+  editor.spellcheck = ENABLE_SPELLCHECK;
+
+  toggleSoundBtn.addEventListener('click', () => {
+    soundEnabled = !soundEnabled;
+    toggleSoundBtn.textContent = soundEnabled ? "Suono Tasti: ON" : "Suono Tasti: OFF";
+  });
+
+  function scaleSheet() {
+    const availableWidth = window.innerWidth * 0.8;
+    const scale = availableWidth / 793;
+    container.style.transform = `scale(${scale})`;
+    const sideMargin = (window.innerWidth - 793 * scale) / 2;
+    container.style.marginLeft = `${sideMargin}px`;
+    container.style.marginRight = `${sideMargin}px`;
+  }
+  window.addEventListener('resize', scaleSheet);
+  window.addEventListener('load', scaleSheet);
+
+  editor.addEventListener("keydown", e => {
+    if (["Backspace","Delete","ArrowLeft","ArrowUp","ArrowRight","ArrowDown"].includes(e.key)) e.preventDefault();
+
+    const excludedKeys = ["Shift","Control","Alt","Meta","CapsLock","Tab"];
+    if (soundEnabled && !excludedKeys.includes(e.key)) {
+      keySound.currentTime = 0;
+      keySound.play();
+    }
+  });
+
+  editor.addEventListener("input", () => {
+    const range = document.createRange();
+    const sel = window.getSelection();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    sel.removeAllRanges();
+    sel.addRange(range);
+  });
+
+  // 🔑 Legge la Client ID da .env
+  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+
+  document.getElementById("loginBtn").addEventListener("click", () => {
+    google.accounts.oauth2.initTokenClient({
+      client_id: clientId,
+      scope: "https://www.googleapis.com/auth/documents https://www.googleapis.com/auth/drive.file",
+      callback: (tokenResponse) => {
+        accessToken = tokenResponse.access_token;
+        loginIndicator.style.backgroundColor = "green";
+        loginStatus.childNodes[1].textContent = " Loggato";
+        alert("Login completato!");
+      }
+    }).requestAccessToken();
+  });
+
+  document.getElementById("createBtn").addEventListener("click", async () => {
+    if (!accessToken) { alert("Effettua prima il login."); return; }
+    try {
+      const response = await fetch("https://docs.googleapis.com/v1/documents", {
+        method: "POST",
+        headers: {
+          "Authorization": "Bearer " + accessToken,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ title: "Nuovo Documento Macchina da Scrivere" })
+      });
+      const data = await response.json();
+      DOC_ID = data.documentId;
+      alert("Documento creato con ID: " + DOC_ID);
+      setInterval(syncDoc, 10000);
+    } catch(err) {
+      console.error("Errore creazione documento:", err);
+      alert("Errore creazione documento, controlla console.");
+    }
+  });
+
+  async function syncDoc() {
+    if (!DOC_ID || !accessToken) return;
+    const newText = editor.innerText.slice(lastSyncedLength);
+    if (!newText) return;
+
+    try {
+      const docResp = await fetch(`https://docs.googleapis.com/v1/documents/${DOC_ID}`, {
+        headers: { "Authorization": "Bearer " + accessToken }
+      });
+      const docData = await docResp.json();
+      const lastEnd = docData.body.content.reduce((acc, el) => el.endIndex || acc, 1);
+
+      await fetch(`https://docs.googleapis.com/v1/documents/${DOC_ID}:batchUpdate`, {
+        method: "POST",
+        headers: { 
+          "Authorization": "Bearer " + accessToken, 
+          "Content-Type": "application/json" 
+        },
+        body: JSON.stringify({
+          requests: [
+            { insertText: { location: { index: lastEnd - 1 }, text: newText } }
+          ]
+        })
+      });
+
+      lastSyncedLength = editor.innerText.length;
+      console.log("Testo sincronizzato:", newText);
+    } catch(err) {
+      console.error("Errore sync:", err);
+    }
+  }
+</script>
+</body>
+</html>
